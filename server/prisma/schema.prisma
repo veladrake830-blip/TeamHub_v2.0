@@ -1,0 +1,304 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  DEACTIVATED
+}
+
+enum TeamRole {
+  TEAM_LEADER
+  MEMBER
+}
+
+enum RequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
+enum Theme {
+  SYSTEM
+  LIGHT
+  DARK
+}
+
+enum ResetPurpose {
+  RESET
+  FIRST_PASSWORD
+}
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  name         String
+  email        String     @unique
+  /// Null until an Admin-added user sets their first password.
+  passwordHash String?
+  isAdmin      Boolean    @default(false)
+  status       UserStatus @default(PENDING)
+  avatarPath   String?
+  slogan       String     @default("")
+  /// Set when a password reset completes, cleared when the user dismisses the notice.
+  resetNoticeAt DateTime?
+  theme        Theme      @default(SYSTEM)
+  /// Until then, only the Admin can issue this user a reset link. Set when they stop being a TeamLeader.
+  resetLockedUntil DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  sessions        Session[]
+  memberships     Membership[]
+  invitations     Invitation[]         @relation("InvitedUser")
+  sentInvitations Invitation[]         @relation("InvitedBy")
+  joinRequests    JoinRequest[]        @relation("Requester")
+  decidedRequests JoinRequest[]        @relation("DecidedBy")
+  following       UserFollow[]         @relation("Follower")
+  followers       UserFollow[]         @relation("Followee")
+  teamFollows     TeamFollow[]
+  workPlans       WorkPlan[]
+  activityEntries ActivityEntry[]
+  posts           Post[]               @relation("PostAuthor")
+  deletedPosts    Post[]               @relation("PostDeleter")
+  answers         Answer[]             @relation("AnswerAuthor")
+  deletedAnswers  Answer[]             @relation("AnswerDeleter")
+  resetTokens     PasswordResetToken[] @relation("ResetFor")
+  issuedTokens    PasswordResetToken[] @relation("ResetIssuer")
+}
+
+model Session {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @db.Uuid
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash  String    @unique
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  usedTokens        UsedRefreshToken[]
+
+  @@index([userId])
+}
+
+/// Every refresh token already swapped for a new one, so that replaying any of them is detected.
+model UsedRefreshToken {
+  tokenHash String   @id
+  sessionId String   @db.Uuid
+  usedAt    DateTime
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+}
+
+model Team {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String   @unique
+  avatarPath String?
+  slogan     String   @default("")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  memberships  Membership[]
+  invitations  Invitation[]
+  joinRequests JoinRequest[]
+  followers    TeamFollow[]
+}
+
+model Membership {
+  userId   String   @db.Uuid
+  teamId   String   @db.Uuid
+  role     TeamRole @default(MEMBER)
+  joinedAt DateTime @default(now())
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@id([userId, teamId])
+  @@index([teamId])
+}
+
+model Invitation {
+  id          String        @id @default(uuid()) @db.Uuid
+  teamId      String        @db.Uuid
+  userId      String        @db.Uuid
+  invitedById String        @db.Uuid
+  status      RequestStatus @default(PENDING)
+  createdAt   DateTime      @default(now())
+  respondedAt DateTime?
+  team        Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user        User          @relation("InvitedUser", fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy   User          @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([teamId, status])
+}
+
+model JoinRequest {
+  id          String        @id @default(uuid()) @db.Uuid
+  teamId      String        @db.Uuid
+  userId      String        @db.Uuid
+  decidedById String?       @db.Uuid
+  status      RequestStatus @default(PENDING)
+  createdAt   DateTime      @default(now())
+  decidedAt   DateTime?
+  team        Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user        User          @relation("Requester", fields: [userId], references: [id], onDelete: Cascade)
+  decidedBy   User?         @relation("DecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, status])
+  @@index([teamId, status])
+}
+
+model UserFollow {
+  followerId String   @db.Uuid
+  followeeId String   @db.Uuid
+  createdAt  DateTime @default(now())
+  follower   User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  followee   User     @relation("Followee", fields: [followeeId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followeeId])
+}
+
+model TeamFollow {
+  userId    String   @db.Uuid
+  teamId    String   @db.Uuid
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@id([userId, teamId])
+}
+
+model PasswordResetToken {
+  id         String       @id @default(uuid()) @db.Uuid
+  userId     String       @db.Uuid
+  issuedById String?      @db.Uuid
+  purpose    ResetPurpose @default(RESET)
+  tokenHash  String       @unique
+  expiresAt  DateTime
+  usedAt     DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime     @default(now())
+  user       User         @relation("ResetFor", fields: [userId], references: [id], onDelete: Cascade)
+  issuedBy   User?        @relation("ResetIssuer", fields: [issuedById], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}
+
+/// Where an entry came from. MyLifeLens sync will add its own value.
+enum ActivitySource {
+  MANUAL
+}
+
+/// One block of time on one calendar day. Times are minutes from midnight, in the organization timezone.
+model ActivityEntry {
+  id          String         @id @default(uuid()) @db.Uuid
+  userId      String         @db.Uuid
+  date        DateTime       @db.Date
+  startMinute Int
+  endMinute   Int
+  category    String
+  note        String         @default("")
+  source      ActivitySource @default(MANUAL)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([date])
+  @@index([userId, date])
+}
+
+enum PostKind {
+  NEWS
+  TOPIC
+}
+
+/// A news announcement or a forum topic. Deleting is soft: the row stays, hidden from users.
+model Post {
+  id          String    @id @default(uuid()) @db.Uuid
+  kind        PostKind
+  title       String
+  body        String
+  authorId    String    @db.Uuid
+  createdAt   DateTime  @default(now())
+  editedAt    DateTime?
+  deletedAt   DateTime?
+  deletedById String?   @db.Uuid
+  author      User      @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  deletedBy   User?     @relation("PostDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
+  answers     Answer[]
+
+  @@index([kind, deletedAt, createdAt])
+}
+
+model Answer {
+  id          String    @id @default(uuid()) @db.Uuid
+  postId      String    @db.Uuid
+  body        String
+  authorId    String    @db.Uuid
+  createdAt   DateTime  @default(now())
+  editedAt    DateTime?
+  deletedAt   DateTime?
+  deletedById String?   @db.Uuid
+  post        Post      @relation(fields: [postId], references: [id], onDelete: Restrict)
+  author      User      @relation("AnswerAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  deletedBy   User?     @relation("AnswerDeleter", fields: [deletedById], references: [id], onDelete: SetNull)
+
+  @@index([postId, createdAt])
+}
+
+/// One row only, enforced by a CHECK constraint in the migration.
+model OrganizationSettings {
+  id        Int      @id @default(1)
+  timezone  String
+  updatedAt DateTime @updatedAt
+}
+
+/// A daily plan belongs to the person, not to a team.
+model WorkPlan {
+  id        String     @id @default(uuid()) @db.Uuid
+  userId    String     @db.Uuid
+  /// The calendar day in the organization timezone.
+  date      DateTime   @db.Date
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks     WorkTask[]
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+model WorkTask {
+  id       String   @id @default(uuid()) @db.Uuid
+  planId   String   @db.Uuid
+  position Int
+  title    String
+  result   String   @default("")
+  plan     WorkPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, position])
+}
+
+/// Append-only. A database trigger rejects every UPDATE, DELETE and TRUNCATE.
+/// Actor and target are plain values, not foreign keys, so entries outlive what they describe.
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  actorId    String?  @db.Uuid
+  actorName  String?
+  action     String
+  targetType String?
+  targetId   String?
+  details    Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([action])
+}

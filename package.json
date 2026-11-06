@@ -1,0 +1,23 @@
+{
+  "name": "teamhub",
+  "private": true,
+  "version": "2.0.0",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "setup": "npm run db:init && npm run db:generate -w server && npm run db:migrate && npm run db:seed",
+    "db:init": "node scripts/devdb.mjs init",
+    "db:start": "node scripts/devdb.mjs start",
+    "db:stop": "node scripts/devdb.mjs stop",
+    "db:migrate": "npm run db:migrate -w server",
+    "db:seed": "npm run db:seed -w server",
+    "dev:server": "npm run dev -w server",
+    "dev:client": "npm run dev -w client",
+    "test": "npm test -w server",
+    "build": "npm run build -w client && npm run build -w server",
+    "start": "npm start -w server",
+    "backup": "node scripts/backup.mjs"
+  }
+}
